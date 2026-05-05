@@ -217,8 +217,7 @@ function HomePage() {
     } | null;
     const nextPermissions = data?.permissions || GUEST_PERMISSIONS;
     setPermissions(nextPermissions);
-    const allowGuestInteractive =
-      options.allowGuestInteractive && form.interactiveMode && nextPermissions.role === 'guest';
+    const allowGuestInteractive = options.allowGuestInteractive && nextPermissions.role === 'guest';
     if (!nextPermissions.canEdit && !allowGuestInteractive) {
       toast.error('游客只能观看，请先登录后再创作');
       return false;
@@ -356,7 +355,7 @@ function HomePage() {
         userNickname: userProfile.nickname || undefined,
         userBio: userProfile.bio || undefined,
         webSearch: form.webSearch || undefined,
-        interactiveMode: form.interactiveMode,
+        interactiveMode: form.interactiveMode || permissions.role === 'guest',
       };
 
       let pdfStorageKey: string | undefined;
@@ -415,7 +414,9 @@ function HomePage() {
 
   const canCreate = permissions.canEdit;
   const canUseInteractiveMode = canCreate || permissions.role === 'guest';
-  const canGenerate = (canCreate || form.interactiveMode) && !!form.requirement.trim();
+  const effectiveInteractiveMode =
+    form.interactiveMode || (!canCreate && permissions.role === 'guest');
+  const canGenerate = (canCreate || effectiveInteractiveMode) && !!form.requirement.trim();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -620,16 +621,21 @@ function HomePage() {
                     whileTap={{ scale: 0.95 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                     onClick={() => {
+                      if (!canCreate && permissions.role === 'guest') {
+                        updateForm('interactiveMode', true);
+                        toast.info('游客默认使用深度交互');
+                        return;
+                      }
                       updateForm('interactiveMode', !form.interactiveMode);
                     }}
                     className={cn(
                       'relative inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all cursor-pointer select-none whitespace-nowrap border shrink-0 h-8',
-                      form.interactiveMode
+                      effectiveInteractiveMode
                         ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 border-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.35)] dark:shadow-[0_0_12px_rgba(6,182,212,0.25)]'
                         : 'border-cyan-300/60 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/20',
                     )}
                   >
-                    {form.interactiveMode && (
+                    {effectiveInteractiveMode && (
                       <span
                         className="absolute inset-[-4px] rounded-full border border-cyan-400/40 dark:border-cyan-400/25"
                         style={{
