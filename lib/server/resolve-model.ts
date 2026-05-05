@@ -22,6 +22,13 @@ export interface ResolvedModel extends ModelWithInfo {
   thinkingConfig?: ThinkingConfig;
 }
 
+function normalizeServerModel(providerId: string, modelId: string) {
+  if (providerId === 'deepseek' && modelId === 'deepseek-v4-lite') {
+    return 'deepseek-v4-flash';
+  }
+  return modelId;
+}
+
 /**
  * Resolve a language model from explicit parameters.
  *
@@ -34,8 +41,11 @@ export async function resolveModel(params: {
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
 }): Promise<ResolvedModel> {
-  const modelString = params.modelString || process.env.DEFAULT_MODEL || 'gpt-5.4-mini';
-  const { providerId, modelId } = parseModelString(modelString);
+  const requestedModelString = params.modelString || process.env.DEFAULT_MODEL || 'gpt-5.4-mini';
+  const { providerId, modelId: requestedModelId } = parseModelString(requestedModelString);
+  const modelId = normalizeServerModel(providerId, requestedModelId);
+  const modelString =
+    modelId === requestedModelId ? requestedModelString : `${providerId}:${modelId}`;
 
   // SSRF validation applies only to client-supplied base URLs.
   // Server-configured URLs (e.g. OLLAMA_BASE_URL from env/YAML) flow through
