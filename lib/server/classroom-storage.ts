@@ -39,6 +39,11 @@ export interface PersistedClassroomData {
   stage: Stage;
   scenes: Scene[];
   createdAt: string;
+  updatedAt?: string;
+  ownerId?: string;
+  ownerName?: string;
+  published?: boolean;
+  publishedAt?: string;
 }
 
 export function isValidClassroomId(id: string): boolean {
@@ -63,14 +68,24 @@ export async function persistClassroom(
     id: string;
     stage: Stage;
     scenes: Scene[];
+    ownerId?: string;
+    ownerName?: string;
+    published?: boolean;
   },
   baseUrl: string,
 ): Promise<PersistedClassroomData & { url: string }> {
+  const existing = await readClassroom(data.id);
+  const now = new Date().toISOString();
   const classroomData: PersistedClassroomData = {
     id: data.id,
     stage: data.stage,
     scenes: data.scenes,
-    createdAt: new Date().toISOString(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    ownerId: data.ownerId ?? existing?.ownerId,
+    ownerName: data.ownerName ?? existing?.ownerName,
+    published: data.published ?? existing?.published ?? false,
+    publishedAt: existing?.publishedAt,
   };
 
   await ensureClassroomsDir();
@@ -81,4 +96,41 @@ export async function persistClassroom(
     ...classroomData,
     url: `${baseUrl}/classroom/${data.id}`,
   };
+}
+
+export async function updateClassroomPublishState(
+  id: string,
+  published: boolean,
+): Promise<PersistedClassroomData> {
+  const classroom = await readClassroom(id);
+  if (!classroom) {
+    throw new Error('Classroom not found');
+  }
+  const now = new Date().toISOString();
+  const updated: PersistedClassroomData = {
+    ...classroom,
+    published,
+    publishedAt: published ? classroom.publishedAt || now : undefined,
+    updatedAt: now,
+  };
+  await writeJsonFileAtomic(path.join(CLASSROOMS_DIR, `${id}.json`), updated);
+  return updated;
+}
+
+export async function listPublishedClassrooms(): Promise<PersistedClassroomData[]> {
+  await ensureClassroomsDir();
+  const entries = await fs.readdir(CLASSROOMS_DIR, { withFileTypes: true });
+  const classrooms = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .map(async (entry) => {
+        const id = entry.name.replace(/\.json$/, '');
+        return readClassroom(id);
+      }),
+  );
+  return classrooms
+    .filter((item): item is PersistedClassroomData => !!item?.published)
+    .sort((a, b) =>
+      (b.publishedAt || b.updatedAt || '').localeCompare(a.publishedAt || a.updatedAt || ''),
+    );
 }

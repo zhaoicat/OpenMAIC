@@ -35,6 +35,28 @@ function stripCodeFences(text: string): string {
   return cleaned.trim();
 }
 
+const QWEN_ROLE_VOICE_ORDER: Record<string, string[]> = {
+  teacher: ['Elias', 'Ethan', 'Vincent'],
+  assistant: ['Serena', 'Cherry', 'Maia'],
+  student: ['Dylan', 'Momo', 'Nofish', 'Sunny', 'Pip', 'Stella', 'Ryan', 'Kiki'],
+};
+
+function pickQwenVoiceForRole(
+  role: string,
+  index: number,
+  availableVoices?: Array<{ providerId: string; voiceId: string; voiceName: string }>,
+): { providerId: string; voiceId: string } | undefined {
+  const qwenVoiceIds = new Set(
+    availableVoices?.filter((v) => v.providerId === 'qwen-tts').map((v) => v.voiceId) || [],
+  );
+  if (qwenVoiceIds.size === 0) return undefined;
+
+  const roleKey = role in QWEN_ROLE_VOICE_ORDER ? role : 'student';
+  const candidates = QWEN_ROLE_VOICE_ORDER[roleKey].filter((voiceId) => qwenVoiceIds.has(voiceId));
+  const voiceId = candidates[index % Math.max(candidates.length, 1)];
+  return voiceId ? { providerId: 'qwen-tts', voiceId } : undefined;
+}
+
 export async function POST(req: NextRequest) {
   let stageName: string | undefined;
   let modelString: string | undefined;
@@ -194,10 +216,13 @@ Return a JSON object with this exact structure:
     // ── Build output with IDs ──
     const agents = parsed.agents.map((agent, index) => {
       // Parse voice "providerId::voiceId" format
-      let voiceConfig: { providerId: string; voiceId: string } | undefined;
+      let voiceConfig =
+        pickQwenVoiceForRole(agent.role, index, availableVoices) as
+          | { providerId: string; voiceId: string }
+          | undefined;
       if (agent.voice && agent.voice.includes('::')) {
         const [providerId, voiceId] = agent.voice.split('::');
-        if (providerId && voiceId) {
+        if (!voiceConfig && providerId && voiceId) {
           voiceConfig = { providerId, voiceId };
         }
       }

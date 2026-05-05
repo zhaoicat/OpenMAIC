@@ -21,6 +21,7 @@ import type { Action, DiscussionAction, SpeechAction } from '@/lib/types/action'
 import { cn } from '@/lib/utils';
 // Playback state persistence removed — refresh always starts from the beginning
 import { ChatArea, type ChatAreaRef } from '@/components/chat/chat-area';
+import { RegenerateSceneDialog } from '@/components/stage/regenerate-scene-dialog';
 import { agentsToParticipants, useAgentRegistry } from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import {
@@ -33,6 +34,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { AlertTriangle } from 'lucide-react';
 import { VisuallyHidden } from 'radix-ui';
+import type { RolePermissions } from '@/lib/types/auth';
 
 /**
  * Stage Component
@@ -109,6 +111,8 @@ export function Stage({
   const [isPresenting, setIsPresenting] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isPresentationInteractionActive, setIsPresentationInteractionActive] = useState(false);
+  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
+  const [permissions, setPermissions] = useState<RolePermissions | null>(null);
 
   // Whiteboard state (from canvas store so AI tools can open it)
   const whiteboardOpen = useCanvasStore.use.whiteboardOpen();
@@ -179,6 +183,21 @@ export function Stage({
   const autoStartRef = useRef(false);
   // Discussion buffer-level pause state (distinct from soft-pause which aborts SSE)
   const [isDiscussionPaused, setIsDiscussionPaused] = useState(false);
+
+  useEffect(() => {
+    const loadPermissions = async () => {
+      const res = await fetch('/api/auth/me');
+      const data = (await res.json().catch(() => null)) as {
+        permissions?: RolePermissions;
+      } | null;
+      setPermissions(data?.permissions || null);
+    };
+
+    loadPermissions().catch(() => undefined);
+    const handleAuthChanged = () => loadPermissions().catch(() => undefined);
+    window.addEventListener('openmaic-auth-changed', handleAuthChanged);
+    return () => window.removeEventListener('openmaic-auth-changed', handleAuthChanged);
+  }, []);
 
   /**
    * Resume a soft-paused topic: re-call /chat with existing session messages.
@@ -974,8 +993,17 @@ export function Stage({
               currentScene?.title ||
               (isCourseComplete && isPendingScene ? t('stage.courseComplete') : '')
             }
+            onRegenerateCurrentScene={
+              currentScene && permissions?.canEdit ? () => setRegenerateDialogOpen(true) : undefined
+            }
           />
         )}
+
+        <RegenerateSceneDialog
+          scene={currentScene}
+          open={regenerateDialogOpen}
+          onOpenChange={setRegenerateDialogOpen}
+        />
 
         {/* Canvas Area */}
         <div

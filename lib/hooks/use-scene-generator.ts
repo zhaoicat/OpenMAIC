@@ -30,7 +30,7 @@ interface SceneActionsResult {
   error?: string;
 }
 
-function getApiHeaders(): HeadersInit {
+export function getApiHeaders(): HeadersInit {
   const config = getCurrentModelConfig();
   const settings = useSettingsStore.getState();
   const imageProviderConfig = settings.imageProvidersConfig?.[settings.imageProviderId];
@@ -58,13 +58,13 @@ function getApiHeaders(): HeadersInit {
   };
 }
 
-function withThinkingConfig<T extends Record<string, unknown>>(body: T): T {
+export function withThinkingConfig<T extends Record<string, unknown>>(body: T): T {
   const { thinkingConfig } = getCurrentModelConfig();
   return thinkingConfig ? ({ ...body, thinkingConfig } as T) : body;
 }
 
 /** Call POST /api/generate/scene-content (step 1) */
-async function fetchSceneContent(
+export async function fetchSceneContent(
   params: {
     outline: SceneOutline;
     allOutlines: SceneOutline[];
@@ -98,7 +98,7 @@ async function fetchSceneContent(
 }
 
 /** Call POST /api/generate/scene-actions (step 2) */
-async function fetchSceneActions(
+export async function fetchSceneActions(
   params: {
     outline: SceneOutline;
     allOutlines: SceneOutline[];
@@ -191,7 +191,7 @@ export async function generateAndStoreTTS(
 }
 
 /** Generate TTS for all speech actions in a scene. Returns result. */
-async function generateTTSForScene(
+export async function generateTTSForScene(
   scene: Scene,
   language?: string,
   signal?: AbortSignal,

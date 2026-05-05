@@ -290,6 +290,7 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
 
   [getModelMetadataKey('deepseek', 'deepseek-v4-pro')]: deepseekEffort,
   [getModelMetadataKey('deepseek', 'deepseek-v4-flash')]: deepseekEffort,
+  [getModelMetadataKey('deepseek', 'deepseek-v4-lite')]: deepseekEffort,
 
   [getModelMetadataKey('kimi', 'kimi-k2.6')]: toggleCapability('kimi'),
   [getModelMetadataKey('kimi', 'kimi-k2.5')]: toggleCapability('kimi'),

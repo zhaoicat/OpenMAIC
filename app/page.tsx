@@ -20,7 +20,6 @@ import {
   BotOff,
   ChevronUp,
   Upload,
-  Sparkles,
   Atom,
   X,
 } from 'lucide-react';
@@ -55,6 +54,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
+import { AdminSettingsButton, AuthControls } from '@/components/auth/auth-controls';
+import type { RolePermissions } from '@/lib/types/auth';
 
 const log = createLogger('Home');
 
@@ -76,12 +77,21 @@ const initialFormState: FormState = {
   interactiveMode: false,
 };
 
+const GUEST_PERMISSIONS: RolePermissions = {
+  role: 'guest',
+  canEdit: false,
+  canPublish: false,
+  canManageModels: false,
+  canManageAllWorks: false,
+};
+
 function HomePage() {
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialFormState);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [permissions, setPermissions] = useState<RolePermissions>(GUEST_PERMISSIONS);
   const [settingsSection, setSettingsSection] = useState<
     import('@/lib/types/settings').SettingsSection | undefined
   >(undefined);
@@ -147,6 +157,14 @@ function HomePage() {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const loadPermissions = async () => {
+    const res = await fetch('/api/auth/me');
+    const data = (await res.json().catch(() => null)) as {
+      permissions?: RolePermissions;
+    } | null;
+    setPermissions(data?.permissions || GUEST_PERMISSIONS);
+  };
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     if (!themeOpen) return;
@@ -158,6 +176,17 @@ function HomePage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [themeOpen]);
+
+  useEffect(() => {
+    const refreshPermissions = () => loadPermissions().catch(() => undefined);
+    const permissionsTimer = window.setTimeout(refreshPermissions, 0);
+    const handleAuthChanged = () => loadPermissions().catch(() => undefined);
+    window.addEventListener('openmaic-auth-changed', handleAuthChanged);
+    return () => {
+      window.clearTimeout(permissionsTimer);
+      window.removeEventListener('openmaic-auth-changed', handleAuthChanged);
+    };
+  }, []);
 
   const loadClassrooms = async () => {
     try {
@@ -179,6 +208,28 @@ function HomePage() {
     },
   );
 
+  const requireCreatePermission = async (
+    options: { allowGuestInteractive?: boolean } = {},
+  ): Promise<boolean> => {
+    const res = await fetch('/api/auth/me');
+    const data = (await res.json().catch(() => null)) as {
+      permissions?: RolePermissions;
+    } | null;
+    const nextPermissions = data?.permissions || GUEST_PERMISSIONS;
+    setPermissions(nextPermissions);
+    const allowGuestInteractive =
+      options.allowGuestInteractive && form.interactiveMode && nextPermissions.role === 'guest';
+    if (!nextPermissions.canEdit && !allowGuestInteractive) {
+      toast.error('游客只能观看，请先登录后再创作');
+      return false;
+    }
+    return true;
+  };
+
+  const triggerImportWithPermission = async () => {
+    if (await requireCreatePermission()) triggerFileSelect();
+  };
+
   useEffect(() => {
     // Clear stale media store to prevent cross-course thumbnail contamination.
     // The store may hold tasks from a previously visited classroom whose elementIds
@@ -192,6 +243,10 @@ function HomePage() {
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!permissions.canEdit) {
+      toast.error('游客只能观看，请先登录后再管理作品');
+      return;
+    }
     setPendingDeleteId(id);
   };
 
@@ -207,6 +262,10 @@ function HomePage() {
   };
 
   const handleRename = async (id: string, newName: string) => {
+    if (!permissions.canEdit) {
+      toast.error('游客只能观看，请先登录后再管理作品');
+      return;
+    }
     try {
       await renameStage(id, newName);
       setClassrooms((prev) => prev.map((c) => (c.id === id ? { ...c, name: newName } : c)));
@@ -270,6 +329,8 @@ function HomePage() {
   };
 
   const handleGenerate = async () => {
+    if (!(await requireCreatePermission({ allowGuestInteractive: true }))) return;
+
     // Validate setup before proceeding
     if (!currentModelId) {
       showSetupToast(
@@ -352,7 +413,9 @@ function HomePage() {
     return date.toLocaleDateString();
   };
 
-  const canGenerate = !!form.requirement.trim();
+  const canCreate = permissions.canEdit;
+  const canUseInteractiveMode = canCreate || permissions.role === 'guest';
+  const canGenerate = (canCreate || form.interactiveMode) && !!form.requirement.trim();
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -442,14 +505,13 @@ function HomePage() {
 
         <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
 
+        <AuthControls showPublish={false} />
+
+        <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+
         {/* Settings Button */}
         <div className="relative">
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
-          >
-            <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
-          </button>
+          <AdminSettingsButton />
         </div>
       </div>
       <SettingsDialog
@@ -557,7 +619,9 @@ function HomePage() {
                   <motion.button
                     whileTap={{ scale: 0.95 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                    onClick={() => updateForm('interactiveMode', !form.interactiveMode)}
+                    onClick={() => {
+                      updateForm('interactiveMode', !form.interactiveMode);
+                    }}
                     className={cn(
                       'relative inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all cursor-pointer select-none whitespace-nowrap border shrink-0 h-8',
                       form.interactiveMode
@@ -586,6 +650,10 @@ function HomePage() {
               <SpeechButton
                 size="md"
                 onTranscription={(text) => {
+                  if (!canUseInteractiveMode) {
+                    toast.error('游客只能观看，请先登录后再创作');
+                    return;
+                  }
                   setForm((prev) => {
                     const next = prev.requirement + (prev.requirement ? ' ' : '') + text;
                     updateRequirementCache(next);
@@ -629,7 +697,7 @@ function HomePage() {
         {/* ── Import button (empty state) ── */}
         {classrooms.length === 0 && (
           <button
-            onClick={triggerFileSelect}
+            onClick={triggerImportWithPermission}
             disabled={importing}
             className="relative z-10 mt-4 flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
           >
@@ -749,7 +817,7 @@ function HomePage() {
               </AnimatePresence>
 
               <button
-                onClick={triggerFileSelect}
+                onClick={triggerImportWithPermission}
                 disabled={importing}
                 className="group/import grid grid-cols-[auto_0fr] hover:grid-cols-[auto_1fr] items-center gap-1 rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/35 hover:text-muted-foreground/70 hover:bg-muted/50 transition-all duration-200 cursor-pointer"
               >
@@ -795,6 +863,7 @@ function HomePage() {
                           formatDate={formatDate}
                           onDelete={handleDelete}
                           onRename={handleRename}
+                          canManage={permissions.canEdit}
                           confirmingDelete={pendingDeleteId === classroom.id}
                           onConfirmDelete={() => confirmDelete(classroom.id)}
                           onCancelDelete={() => setPendingDeleteId(null)}
@@ -1110,6 +1179,7 @@ function ClassroomCard({
   formatDate,
   onDelete,
   onRename,
+  canManage,
   confirmingDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -1120,6 +1190,7 @@ function ClassroomCard({
   formatDate: (ts: number) => string;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onRename: (id: string, newName: string) => void;
+  canManage: boolean;
   confirmingDelete: boolean;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
@@ -1148,6 +1219,10 @@ function ClassroomCard({
 
   const startRename = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canManage) {
+      toast.error('游客只能观看，请先登录后再管理作品');
+      return;
+    }
     setNameDraft(classroom.name);
     setEditing(true);
   };
@@ -1210,7 +1285,7 @@ function ClassroomCard({
 
         {/* Delete — top-right, only on hover */}
         <AnimatePresence>
-          {!confirmingDelete && (
+          {canManage && !confirmingDelete && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -1298,7 +1373,10 @@ function ClassroomCard({
           <Tooltip>
             <TooltipTrigger asChild>
               <p
-                className="font-medium text-[15px] truncate text-foreground/90 min-w-0 cursor-text"
+                className={cn(
+                  'font-medium text-[15px] truncate text-foreground/90 min-w-0',
+                  canManage && 'cursor-text',
+                )}
                 onDoubleClick={startRename}
               >
                 {classroom.name}

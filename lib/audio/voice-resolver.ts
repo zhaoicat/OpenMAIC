@@ -15,6 +15,31 @@ export interface ResolvedVoice {
   voiceId: string;
 }
 
+const QWEN_ROLE_VOICE_ORDER: Record<string, string[]> = {
+  teacher: ['Elias', 'Ethan', 'Vincent'],
+  assistant: ['Serena', 'Cherry', 'Maia'],
+  student: ['Dylan', 'Momo', 'Nofish', 'Sunny', 'Pip', 'Stella', 'Ryan', 'Kiki'],
+};
+
+function pickRoleVoice(
+  providerId: TTSProviderId,
+  role: string | undefined,
+  agentIndex: number,
+  voices: Array<{ id: string }>,
+): string | undefined {
+  if (providerId !== 'qwen-tts') return undefined;
+
+  const roleKey = (role || '').toLowerCase();
+  const candidates =
+    roleKey in QWEN_ROLE_VOICE_ORDER
+      ? QWEN_ROLE_VOICE_ORDER[roleKey]
+      : QWEN_ROLE_VOICE_ORDER.student;
+  const available = new Set(voices.map((voice) => voice.id));
+  const matched = candidates.filter((voiceId) => available.has(voiceId));
+  if (matched.length === 0) return undefined;
+  return matched[agentIndex % matched.length];
+}
+
 /**
  * Resolve the TTS provider + voice for an agent.
  * 1. If agent has voiceConfig and the voice is still valid, use it
@@ -53,9 +78,10 @@ export function resolveAgentVoice(
   // Fallback: first available provider, deterministic voice
   if (availableProviders.length > 0) {
     const first = availableProviders[0];
+    const roleVoice = pickRoleVoice(first.providerId, agent.role, agentIndex, first.voices);
     return {
       providerId: first.providerId,
-      voiceId: first.voices[agentIndex % first.voices.length].id,
+      voiceId: roleVoice ?? first.voices[agentIndex % first.voices.length].id,
     };
   }
 

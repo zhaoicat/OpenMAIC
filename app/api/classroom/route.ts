@@ -7,6 +7,7 @@ import {
   persistClassroom,
   readClassroom,
 } from '@/lib/server/classroom-storage';
+import { canManageOwnedResource, getCurrentUser } from '@/lib/server/auth';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('Classroom API');
@@ -30,10 +31,36 @@ export async function POST(request: NextRequest) {
 
     const id = stage.id || randomUUID();
     const baseUrl = buildRequestOrigin(request);
+    const user = await getCurrentUser(request);
+    const existing = await readClassroom(id);
+    if (existing?.ownerId && !canManageOwnedResource(user, existing.ownerId)) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 403, '没有权限更新该作品');
+    }
 
-    const persisted = await persistClassroom({ id, stage: { ...stage, id }, scenes }, baseUrl);
+    const persisted = await persistClassroom(
+      {
+        id,
+        stage: { ...stage, id },
+        scenes,
+        ownerId: existing?.ownerId ?? user?.id,
+        ownerName: existing?.ownerName ?? user?.name,
+      },
+      baseUrl,
+    );
 
-    return apiSuccess({ id: persisted.id, url: persisted.url }, 201);
+    return apiSuccess(
+      {
+        id: persisted.id,
+        url: persisted.url,
+        classroom: {
+          ownerId: persisted.ownerId,
+          ownerName: persisted.ownerName,
+          published: persisted.published,
+          publishedAt: persisted.publishedAt,
+        },
+      },
+      201,
+    );
   } catch (error) {
     log.error(
       `Classroom storage failed [stageId=${stageId ?? 'unknown'}, scenes=${sceneCount ?? 0}]:`,
@@ -68,8 +95,16 @@ export async function GET(request: NextRequest) {
     if (!classroom) {
       return apiError(API_ERROR_CODES.INVALID_REQUEST, 404, 'Classroom not found');
     }
+    const user = await getCurrentUser(request);
+    const canView =
+      classroom.published ||
+      !classroom.ownerId ||
+      (user && (user.role === 'admin' || classroom.ownerId === user.id));
+    if (!canView) {
+      return apiError(API_ERROR_CODES.INVALID_REQUEST, 403, '没有权限查看该作品');
+    }
 
-    return apiSuccess({ classroom });
+    return apiSuccess({ classroom, user });
   } catch (error) {
     log.error(
       `Classroom retrieval failed [id=${request.nextUrl.searchParams.get('id') ?? 'unknown'}]:`,

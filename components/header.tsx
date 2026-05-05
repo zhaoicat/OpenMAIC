@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Settings,
   Sun,
   Moon,
   Monitor,
@@ -11,28 +10,29 @@ import {
   FileDown,
   Package,
   Archive,
+  WandSparkles,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useTheme } from '@/lib/hooks/use-theme';
 import { LanguageSwitcher } from './language-switcher';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { SettingsDialog } from './settings';
 import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store/stage';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useExportPPTX } from '@/lib/export/use-export-pptx';
 import { useExportClassroom } from '@/lib/export/use-export-classroom';
+import { AdminSettingsButton, AuthControls } from '@/components/auth/auth-controls';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
+  readonly onRegenerateCurrentScene?: () => void;
 }
 
-export function Header({ currentSceneTitle }: HeaderProps) {
+export function Header({ currentSceneTitle, onRegenerateCurrentScene }: HeaderProps) {
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
   // Export
@@ -165,14 +165,26 @@ export function Header({ currentSceneTitle }: HeaderProps) {
 
           <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
 
+          <AuthControls />
+
+          <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+
+          {onRegenerateCurrentScene && (
+            <>
+              <button
+                onClick={onRegenerateCurrentScene}
+                className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
+                title="编辑当前页并重生成"
+              >
+                <WandSparkles className="w-4 h-4" />
+              </button>
+              <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+            </>
+          )}
+
           {/* Settings Button */}
           <div className="relative">
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
-            >
-              <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
-            </button>
+            <AdminSettingsButton />
           </div>
         </div>
 
@@ -250,7 +262,6 @@ export function Header({ currentSceneTitle }: HeaderProps) {
           )}
         </div>
       </header>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
 }

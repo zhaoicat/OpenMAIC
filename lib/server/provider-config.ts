@@ -205,6 +205,7 @@ function loadEnvSection(
 
 const DEFAULT_FILENAME = 'server-providers.yml';
 const OPENAI_IMAGE_PROVIDER_ID = 'openai-image';
+const ADMIN_CONFIG_FILE = path.join(process.cwd(), 'data', 'admin', 'provider-config.json');
 
 /** Cache keyed by YAML filename (empty string = default file). */
 const _configs: Map<string, ServerConfig> = new Map();
@@ -250,6 +251,69 @@ function buildConfig(yamlData: YamlData): ServerConfig {
   };
 }
 
+function loadAdminConfigFile(): YamlData {
+  try {
+    if (!fs.existsSync(ADMIN_CONFIG_FILE)) return {};
+    const raw = fs.readFileSync(ADMIN_CONFIG_FILE, 'utf-8');
+    const parsed = JSON.parse(raw) as YamlData | null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    log.warn('[ServerProviderConfig] Failed to load admin provider config:', e);
+    return {};
+  }
+}
+
+function applyAdminSection(
+  target: Record<string, ServerProviderEntry>,
+  section?: Record<string, Partial<ServerProviderEntry>>,
+) {
+  if (!section) return;
+  for (const [id, entry] of Object.entries(section)) {
+    if (!entry) {
+      continue;
+    }
+
+    const hasExplicitFields =
+      entry.apiKey != null ||
+      entry.baseUrl != null ||
+      entry.proxy != null ||
+      (Array.isArray(entry.models) && entry.models.length > 0);
+
+    if (!hasExplicitFields) {
+      delete target[id];
+      continue;
+    }
+
+    const existing = target[id];
+    target[id] = {
+      apiKey: entry.apiKey ?? existing?.apiKey ?? '',
+      baseUrl: entry.baseUrl ?? existing?.baseUrl,
+      models: entry.models?.filter(Boolean) ?? existing?.models,
+      proxy: entry.proxy ?? existing?.proxy,
+    };
+  }
+}
+
+function applyAdminConfig(config: ServerConfig, adminData: YamlData): ServerConfig {
+  const next: ServerConfig = {
+    providers: { ...config.providers },
+    tts: { ...config.tts },
+    asr: { ...config.asr },
+    pdf: { ...config.pdf },
+    image: { ...config.image },
+    video: { ...config.video },
+    webSearch: { ...config.webSearch },
+  };
+  applyAdminSection(next.providers, adminData.providers);
+  applyAdminSection(next.tts, adminData.tts);
+  applyAdminSection(next.asr, adminData.asr);
+  applyAdminSection(next.pdf, adminData.pdf);
+  applyAdminSection(next.image, adminData.image);
+  applyAdminSection(next.video, adminData.video);
+  applyAdminSection(next.webSearch, adminData['web-search']);
+  return next;
+}
+
 function logConfig(config: ServerConfig, label: string): void {
   const counts = [
     Object.keys(config.providers).length,
@@ -272,10 +336,14 @@ function getConfig(): ServerConfig {
   if (cached) return cached;
 
   const yamlData = loadYamlFile(DEFAULT_FILENAME);
-  const config = buildConfig(yamlData);
+  const config = applyAdminConfig(buildConfig(yamlData), loadAdminConfigFile());
   logConfig(config, DEFAULT_FILENAME);
   _configs.set('', config);
   return config;
+}
+
+export function clearServerProviderConfigCache(): void {
+  _configs.clear();
 }
 
 // ---------------------------------------------------------------------------

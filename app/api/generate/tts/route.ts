@@ -77,12 +77,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const apiKey = clientBaseUrl
-      ? ttsApiKey || ''
-      : resolveTTSApiKey(ttsProviderId, ttsApiKey || undefined);
-    const baseUrl = clientBaseUrl
-      ? clientBaseUrl
-      : resolveTTSBaseUrl(ttsProviderId, ttsBaseUrl || undefined);
+    const serverBaseUrl = resolveTTSBaseUrl(ttsProviderId);
+    const normalizeBaseUrl = (url?: string) => url?.replace(/\/+$/, '');
+    const canUseServerKey =
+      !clientBaseUrl || normalizeBaseUrl(clientBaseUrl) === normalizeBaseUrl(serverBaseUrl);
+    const apiKey =
+      ttsApiKey || (canUseServerKey ? resolveTTSApiKey(ttsProviderId, undefined) : '');
+    const baseUrl = clientBaseUrl || serverBaseUrl;
 
     // Build TTS config
     const config = {

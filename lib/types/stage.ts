@@ -78,6 +78,27 @@ export interface Scene {
   // Metadata
   createdAt?: number;
   updatedAt?: number;
+  editMetadata?: SceneEditMetadata;
+}
+
+/**
+ * Page-level editing instructions saved with a scene.
+ * These fields let authors tune one page and regenerate only that page later.
+ */
+export interface SceneEditMetadata {
+  titleDraft?: string;
+  audienceLevel?: string;
+  teachingFocus?: string;
+  exampleStyle?: string;
+  interactionRequirement?: string;
+  regenerationNotes?: string;
+  sourcePrompt?: string;
+  lockedFields?: {
+    title?: boolean;
+  };
+  version?: number;
+  updatedAt?: number;
+  lastGeneratedAt?: number;
 }
 
 /**

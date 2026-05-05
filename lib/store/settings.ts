@@ -345,7 +345,7 @@ const getDefaultAudioConfig = () => ({
     'openai-tts': { apiKey: '', baseUrl: '', enabled: true },
     'azure-tts': { apiKey: '', baseUrl: '', enabled: false },
     'glm-tts': { apiKey: '', baseUrl: '', enabled: false },
-    'qwen-tts': { apiKey: '', baseUrl: '', enabled: false },
+    'qwen-tts': { apiKey: '', baseUrl: '', modelId: 'qwen3-tts-flash', enabled: false },
     'voxcpm-tts': {
       apiKey: '',
       baseUrl: '',
