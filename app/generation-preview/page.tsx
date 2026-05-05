@@ -33,6 +33,16 @@ import { StepVisualizer } from './components/visualizers';
 
 const log = createLogger('GenerationPreview');
 
+type AgentActivityStatus = 'pending' | 'running' | 'done' | 'error';
+
+interface AgentActivity {
+  id: string;
+  title: string;
+  status: AgentActivityStatus;
+  detail: string;
+  items?: string[];
+}
+
 function GenerationPreviewContent() {
   const router = useRouter();
   const { t } = useI18n();
@@ -51,6 +61,7 @@ function GenerationPreviewContent() {
   const [webSearchSources, setWebSearchSources] = useState<Array<{ title: string; url: string }>>(
     [],
   );
+  const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
   const [showAgentReveal, setShowAgentReveal] = useState(false);
   const [generatedAgents, setGeneratedAgents] = useState<
     Array<{
@@ -124,6 +135,24 @@ function GenerationPreviewContent() {
     return thinkingConfig ? { ...body, thinkingConfig } : body;
   };
 
+  const setActivity = (activityId: string, update: Partial<Omit<AgentActivity, 'id'>>) => {
+    setAgentActivities((prev) =>
+      prev.map((activity) =>
+        activity.id === activityId ? { ...activity, ...update } : activity,
+      ),
+    );
+  };
+
+  const markRunningActivitiesFailed = (message: string) => {
+    setAgentActivities((prev) =>
+      prev.map((activity) =>
+        activity.status === 'running'
+          ? { ...activity, status: 'error', detail: message }
+          : activity,
+      ),
+    );
+  };
+
   // Auto-start generation when session is loaded
   useEffect(() => {
     if (session && !hasStartedRef.current) {
@@ -148,6 +177,39 @@ function GenerationPreviewContent() {
 
     setError(null);
     setCurrentStepIndex(0);
+    const initialModel = getCurrentModelConfig().modelString;
+    setAgentActivities([
+      {
+        id: 'outline',
+        title: '大纲规划智能体',
+        status: 'pending',
+        detail: `等待分析课程需求，模型 ${initialModel}`,
+      },
+      {
+        id: 'agents',
+        title: '角色设计智能体',
+        status: 'pending',
+        detail: '等待大纲完成后生成教师、助教和学生画像',
+      },
+      {
+        id: 'content',
+        title: '内容设计智能体',
+        status: 'pending',
+        detail: '等待生成首个课堂页面内容',
+      },
+      {
+        id: 'actions',
+        title: '互动编排智能体',
+        status: 'pending',
+        detail: '等待生成讲解、提问和互动动作',
+      },
+      {
+        id: 'tts',
+        title: '语音合成智能体',
+        status: 'pending',
+        detail: '等待讲解动作完成后生成配音',
+      },
+    ]);
 
     try {
       // Compute active steps for this session (recomputed after session mutations)
@@ -381,6 +443,11 @@ function GenerationPreviewContent() {
       if (!outlines || outlines.length === 0) {
         log.debug('=== Generating outlines (SSE) ===');
         setStreamingOutlines([]);
+        setActivity('outline', {
+          status: 'running',
+          detail: `正在构建“${stage.name}”的学习路径`,
+          items: [],
+        });
 
         const outlineResult = await new Promise<{
           outlines: SceneOutline[];
@@ -435,10 +502,22 @@ function GenerationPreviewContent() {
                         } else if (evt.type === 'outline') {
                           collected.push(evt.data);
                           setStreamingOutlines([...collected]);
+                          setActivity('outline', {
+                            status: 'running',
+                            detail: `已生成 ${collected.length} 个课堂节点`,
+                            items: collected.map(
+                              (outline) => `${outline.order}. ${outline.title}`,
+                            ),
+                          });
                         } else if (evt.type === 'retry') {
                           collected.length = 0;
                           setStreamingOutlines([]);
                           setStatusMessage(t('generation.outlineRetrying'));
+                          setActivity('outline', {
+                            status: 'running',
+                            detail: '上一次输出不完整，正在重新规划大纲',
+                            items: [],
+                          });
                         } else if (evt.type === 'done') {
                           directive = evt.languageDirective || directive;
                           resolve({
@@ -479,6 +558,11 @@ function GenerationPreviewContent() {
 
         outlines = outlineResult.outlines;
         languageDirective = outlineResult.languageDirective;
+        setActivity('outline', {
+          status: 'done',
+          detail: `完成 ${outlines.length} 个课堂节点`,
+          items: outlines.map((outline) => `${outline.order}. ${outline.title}`),
+        });
 
         // Store languageDirective on the stage
         stage.languageDirective = languageDirective;
@@ -514,6 +598,10 @@ function GenerationPreviewContent() {
       if (settings.agentMode === 'auto') {
         const agentStepIdx = activeSteps.findIndex((s) => s.id === 'agent-generation');
         if (agentStepIdx >= 0) setCurrentStepIndex(agentStepIdx);
+        setActivity('agents', {
+          status: 'running',
+          detail: '正在匹配角色人设、头像、优先级和语音',
+        });
 
         try {
           const allAvatars = [
@@ -603,6 +691,14 @@ function GenerationPreviewContent() {
           if (!agentResp.ok) throw new Error('Agent generation failed');
           const agentData = await agentResp.json();
           if (!agentData.success) throw new Error(agentData.error || 'Agent generation failed');
+          setActivity('agents', {
+            status: 'done',
+            detail: `已生成 ${agentData.agents.length} 位课堂智能体`,
+            items: agentData.agents.map(
+              (agent: { name: string; role: string; persona?: string }) =>
+                `${agent.name} · ${agent.role}${agent.persona ? `：${agent.persona}` : ''}`,
+            ),
+          });
 
           // Save to IndexedDB and registry
           const { saveGeneratedAgents } = await import('@/lib/orchestration/registry/store');
@@ -628,6 +724,10 @@ function GenerationPreviewContent() {
             }));
         } catch (err: unknown) {
           log.warn('[Generation] Agent generation failed, falling back to presets:', err);
+          setActivity('agents', {
+            status: 'error',
+            detail: '自动角色生成失败，已切换为预设智能体继续生成',
+          });
           const registry = useAgentRegistry.getState();
           const fallbackIds = settings.selectedAgentIds.filter((id) => {
             const a = registry.getAgent(id);
@@ -662,6 +762,11 @@ function GenerationPreviewContent() {
             persona: a!.persona,
           }));
         stage.agentIds = presetAgentIds;
+        setActivity('agents', {
+          status: 'done',
+          detail: `使用 ${agents.length} 位预设智能体`,
+          items: agents.map((agent) => `${agent.name} · ${agent.role}`),
+        });
       }
 
       // Move to scene generation step
@@ -697,6 +802,10 @@ function GenerationPreviewContent() {
       const firstOutline = outlines[0];
 
       // Step 2: Generate content (currentStepIndex is already 2)
+      setActivity('content', {
+        status: 'running',
+        detail: `正在生成第 ${firstOutline.order} 页：${firstOutline.title}`,
+      });
       const contentResp = await fetch('/api/generate/scene-content', {
         method: 'POST',
         headers: getApiHeaders(),
@@ -724,10 +833,19 @@ function GenerationPreviewContent() {
       if (!contentData.success || !contentData.content) {
         throw new Error(contentData.error || t('generation.sceneGenerateFailed'));
       }
+      setActivity('content', {
+        status: 'done',
+        detail: `第 ${firstOutline.order} 页内容已完成`,
+        items: [contentData.content.title || firstOutline.title],
+      });
 
       // Generate actions (activate actions step indicator)
       const actionsStepIdx = activeSteps.findIndex((s) => s.id === 'actions');
       setCurrentStepIndex(actionsStepIdx >= 0 ? actionsStepIdx : currentStepIndex + 1);
+      setActivity('actions', {
+        status: 'running',
+        detail: '正在把页面内容转成讲解、提问和交互动作',
+      });
 
       const actionsResp = await fetch('/api/generate/scene-actions', {
         method: 'POST',
@@ -756,6 +874,15 @@ function GenerationPreviewContent() {
       if (!data.success || !data.scene) {
         throw new Error(data.error || t('generation.sceneGenerateFailed'));
       }
+      setActivity('actions', {
+        status: 'done',
+        detail: `已生成 ${data.scene.actions?.length || 0} 个课堂动作`,
+        items: (data.scene.actions || [])
+          .slice(0, 4)
+          .map((action: { type: string; text?: string }) =>
+            action.text ? `${action.type}：${action.text.slice(0, 36)}` : action.type,
+          ),
+      });
 
       // Generate TTS for first scene (part of actions step — blocking)
       if (settings.ttsEnabled && settings.ttsProviderId !== 'browser-native-tts') {
@@ -773,9 +900,16 @@ function GenerationPreviewContent() {
         const speechActions = (data.scene.actions || []).filter(
           (a: { type: string; text?: string }) => a.type === 'speech' && a.text,
         );
+        setActivity('tts', {
+          status: speechActions.length > 0 ? 'running' : 'done',
+          detail:
+            speechActions.length > 0
+              ? `正在合成 ${speechActions.length} 段讲解语音`
+              : '当前页面没有需要合成的讲解语音',
+        });
 
         let ttsFailCount = 0;
-        for (const action of speechActions) {
+        for (const [index, action] of speechActions.entries()) {
           const audioId = `tts_${action.id}`;
           action.audioId = audioId;
           try {
@@ -818,6 +952,10 @@ function GenerationPreviewContent() {
               format: ttsData.format,
               createdAt: Date.now(),
             });
+            setActivity('tts', {
+              status: 'running',
+              detail: `已合成 ${index + 1}/${speechActions.length} 段讲解语音`,
+            });
           } catch (err) {
             log.warn(`[TTS] Failed for ${audioId}:`, err);
             ttsFailCount++;
@@ -827,6 +965,15 @@ function GenerationPreviewContent() {
         if (ttsFailCount > 0 && speechActions.length > 0) {
           throw new Error(t('generation.speechFailed'));
         }
+        setActivity('tts', {
+          status: 'done',
+          detail: `语音合成完成，共 ${speechActions.length} 段`,
+        });
+      } else {
+        setActivity('tts', {
+          status: 'done',
+          detail: settings.ttsEnabled ? '使用浏览器本地语音播放' : '本次未启用语音合成',
+        });
       }
 
       // Add scene to store and navigate
@@ -849,6 +996,11 @@ function GenerationPreviewContent() {
       );
 
       sessionStorage.removeItem('generationSession');
+      setAgentActivities((prev) =>
+        prev.map((activity) =>
+          activity.status === 'pending' ? { ...activity, status: 'done' } : activity,
+        ),
+      );
       await store.saveToStorage();
       router.push(`/classroom/${stage.id}`);
     } catch (err) {
@@ -858,7 +1010,9 @@ function GenerationPreviewContent() {
         return;
       }
       sessionStorage.removeItem('generationSession');
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      markRunningActivitiesFailed(message);
+      setError(message);
     }
   };
 
@@ -912,7 +1066,7 @@ function GenerationPreviewContent() {
       : ALL_STEPS[0];
 
   return (
-    <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center justify-center p-4 relative overflow-hidden text-center">
+    <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center justify-center p-4 relative overflow-x-hidden overflow-y-auto text-center">
       {/* Background Decor */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div
@@ -1092,6 +1246,8 @@ function GenerationPreviewContent() {
           </Card>
         </motion.div>
 
+        {agentActivities.length > 0 && <AgentActivityPanel activities={agentActivities} />}
+
         {/* Footer Action */}
         <div className="h-16 flex items-center justify-center w-full">
           <AnimatePresence>
@@ -1139,6 +1295,88 @@ function GenerationPreviewContent() {
         }}
       />
     </div>
+  );
+}
+
+function AgentActivityPanel({ activities }: { readonly activities: AgentActivity[] }) {
+  const visibleActivities = activities.filter(
+    (activity) => activity.status !== 'pending' || activity.items?.length,
+  );
+  if (visibleActivities.length === 0) return null;
+
+  const statusStyles: Record<AgentActivityStatus, string> = {
+    pending: 'bg-slate-500/30',
+    running: 'bg-blue-400 shadow-[0_0_12px_rgba(96,165,250,0.45)]',
+    done: 'bg-emerald-400',
+    error: 'bg-red-400',
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="w-full rounded-2xl border border-white/10 bg-slate-950/35 p-4 text-left shadow-xl shadow-black/10 backdrop-blur-xl"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Bot className="size-4 text-blue-300" />
+          <span className="text-sm font-semibold text-slate-100">智能体工作台</span>
+        </div>
+        <span className="text-[11px] text-slate-400">实时细节</span>
+      </div>
+
+      <div className="space-y-2.5">
+        {visibleActivities.map((activity) => (
+          <div
+            key={activity.id}
+            className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+          >
+            <div className="flex items-start gap-3">
+              <span
+                className={cn(
+                  'mt-1.5 size-2.5 shrink-0 rounded-full',
+                  statusStyles[activity.status],
+                  activity.status === 'running' && 'animate-pulse',
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-sm font-medium text-slate-100">{activity.title}</span>
+                  <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">
+                    {activity.status === 'pending'
+                      ? '等待中'
+                      : activity.status === 'running'
+                        ? '进行中'
+                        : activity.status === 'done'
+                          ? '已完成'
+                          : '需要处理'}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{activity.detail}</p>
+                {activity.items && activity.items.length > 0 && (
+                  <div className="mt-2 grid gap-1">
+                    {activity.items.slice(0, 5).map((item, index) => (
+                      <div
+                        key={`${activity.id}-${index}-${item}`}
+                        className="truncate rounded-lg bg-black/15 px-2 py-1 text-[11px] leading-4 text-slate-300"
+                        title={item}
+                      >
+                        {item}
+                      </div>
+                    ))}
+                    {activity.items.length > 5 && (
+                      <div className="px-2 pt-0.5 text-[11px] text-slate-500">
+                        还有 {activity.items.length - 5} 项正在后台继续处理
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
