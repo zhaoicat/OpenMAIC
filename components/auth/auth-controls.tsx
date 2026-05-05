@@ -263,7 +263,7 @@ export function AdminProviderDialog({
 }) {
   const fetchServerProviders = useSettingsStore((s) => s.fetchServerProviders);
   const [llmProvider, setLlmProvider] = useState('deepseek');
-  const [llmModel, setLlmModel] = useState('deepseek-v4-lite');
+  const [llmModel, setLlmModel] = useState('deepseek-v4-flash');
   const [llmBaseUrl, setLlmBaseUrl] = useState('https://api.deepseek.com/v1');
   const [llmKey, setLlmKey] = useState('');
   const [ttsProvider, setTtsProvider] = useState('qwen-tts');
